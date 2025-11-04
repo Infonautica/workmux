@@ -277,30 +277,6 @@ pub fn get_unmerged_branches(base_branch: &str) -> Result<HashSet<String>> {
     }
 }
 
-/// Check if a branch has a remote tracking branch in a specific worktree
-pub fn has_remote_tracking_in_worktree(worktree_path: &Path) -> Result<bool> {
-    Cmd::new("git")
-        .workdir(worktree_path)
-        .args(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-        .run_as_check()
-}
-
-/// Pull latest changes from remote in a specific worktree (only if tracking branch exists)
-pub fn pull_in_worktree(worktree_path: &Path) -> Result<()> {
-    // Check if there's a remote tracking branch
-    if !has_remote_tracking_in_worktree(worktree_path)? {
-        // No tracking branch, skip pull silently
-        return Ok(());
-    }
-
-    Cmd::new("git")
-        .workdir(worktree_path)
-        .arg("pull")
-        .run()
-        .context("Failed to pull")?;
-    Ok(())
-}
-
 /// Merge a branch into the current branch in a specific worktree
 pub fn merge_in_worktree(worktree_path: &Path, branch_name: &str) -> Result<()> {
     Cmd::new("git")

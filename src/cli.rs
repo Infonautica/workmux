@@ -214,7 +214,6 @@ fn merge_worktree(
         "Merging '{}' into '{}'...",
         result.branch_merged, result.main_branch
     );
-    println!("✓ Pulled latest changes to '{}'", result.main_branch);
     println!("✓ Merged '{}'", result.branch_merged);
 
     println!(

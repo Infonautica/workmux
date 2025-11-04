@@ -277,12 +277,6 @@ pub fn merge(
     let main_worktree_path =
         git::get_worktree_path(&main_branch).context("Failed to find main branch worktree")?;
 
-    // Pull latest changes in the main worktree
-    let has_remote = git::has_remote_tracking_in_worktree(&main_worktree_path)?;
-    if has_remote {
-        git::pull_in_worktree(&main_worktree_path).context("Failed to pull latest changes")?;
-    }
-
     // Merge the branch into main (in the main worktree)
     git::merge_in_worktree(&main_worktree_path, &branch_to_merge)
         .context("Failed to merge branch")?;
