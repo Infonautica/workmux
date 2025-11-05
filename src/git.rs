@@ -292,6 +292,26 @@ pub fn merge_in_worktree(worktree_path: &Path, branch_name: &str) -> Result<()> 
     Ok(())
 }
 
+/// Rebase the current branch in a worktree onto a base branch
+pub fn rebase_branch_onto_base(worktree_path: &Path, base_branch: &str) -> Result<()> {
+    Cmd::new("git")
+        .workdir(worktree_path)
+        .args(&["rebase", base_branch])
+        .run()
+        .with_context(|| format!("Failed to rebase onto '{}'", base_branch))?;
+    Ok(())
+}
+
+/// Perform a squash merge in a specific worktree (does not commit)
+pub fn merge_squash_in_worktree(worktree_path: &Path, branch_name: &str) -> Result<()> {
+    Cmd::new("git")
+        .workdir(worktree_path)
+        .args(&["merge", "--squash", branch_name])
+        .run()
+        .context("Failed to perform squash merge")?;
+    Ok(())
+}
+
 /// Switch to a different branch in a specific worktree
 pub fn switch_branch_in_worktree(worktree_path: &Path, branch_name: &str) -> Result<()> {
     Cmd::new("git")

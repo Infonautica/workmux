@@ -196,6 +196,17 @@ resources (worktree, tmux window, and local branch).
 - `--delete-remote`, `-r`: Also delete the remote branch after a successful
   merge
 
+**Merge strategies:**
+
+By default, `workmux merge` performs a standard merge commit. You can customize
+the merge behavior with these mutually exclusive flags:
+
+- `--rebase`: Rebase the feature branch onto main before merging (creates a
+  linear history via fast-forward merge). If conflicts occur, you'll need to
+  resolve them manually in the worktree and run `git rebase --continue`.
+- `--squash`: Squash all commits from the feature branch into a single commit
+  on main. You'll be prompted to provide a commit message in your editor.
+
 **What happens:**
 
 1. Determines which branch to merge (specified branch or current branch if
@@ -203,7 +214,8 @@ resources (worktree, tmux window, and local branch).
 2. Checks for uncommitted changes (errors if found, unless
    `--ignore-uncommitted` is used)
 3. Commits staged changes if present (unless `--ignore-uncommitted` is used)
-4. Merges your branch into main
+4. Merges your branch into main using the selected strategy (default: merge
+   commit)
 5. Deletes the tmux window (including the one you're currently in if you ran
    this from a worktree)
 6. Removes the worktree
@@ -218,12 +230,21 @@ you're on, merge it into main, and close the current window as part of cleanup.
 **Examples:**
 
 ```bash
-# Merge branch from main branch
+# Merge branch from main branch (default: merge commit)
 workmux merge user-auth
 
 # Merge the current worktree you're in
 # (run this from within the worktree's tmux window)
 workmux merge
+
+# Rebase onto main before merging for a linear history
+workmux merge user-auth --rebase
+
+# Squash all commits into a single commit
+workmux merge user-auth --squash
+
+# Merge and also delete the remote branch
+workmux merge user-auth --delete-remote
 ```
 
 ---

@@ -4,7 +4,6 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use std::io::{self, Write};
 
-// --- Custom Value Parser ---
 #[derive(Clone, Debug)]
 struct WorktreeBranchParser;
 
@@ -71,7 +70,6 @@ impl clap::builder::TypedValueParser for WorktreeBranchParser {
     }
 }
 
-// --- Shared Argument Structs ---
 #[derive(clap::Args, Debug)]
 struct RemoveArgs {
     /// Name of the branch to remove (defaults to current branch)
@@ -87,7 +85,6 @@ struct RemoveArgs {
     delete_remote: bool,
 }
 
-// --- CLI Definitions ---
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(name = "workmux")]
@@ -133,6 +130,14 @@ enum Commands {
         /// Also delete the remote branch
         #[arg(short = 'r', long)]
         delete_remote: bool,
+
+        /// Rebase the branch onto the main branch before merging (fast-forward)
+        #[arg(long, group = "merge_strategy")]
+        rebase: bool,
+
+        /// Squash all commits from the branch into a single commit on the main branch
+        #[arg(long, group = "merge_strategy")]
+        squash: bool,
     },
 
     /// Remove a worktree, tmux window, and branch without merging
@@ -160,7 +165,6 @@ enum Commands {
     },
 }
 
-// --- Public Entry Point ---
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
 
@@ -175,7 +179,15 @@ pub fn run() -> Result<()> {
             branch_name,
             ignore_uncommitted,
             delete_remote,
-        } => merge_worktree(branch_name.as_deref(), ignore_uncommitted, delete_remote),
+            rebase,
+            squash,
+        } => merge_worktree(
+            branch_name.as_deref(),
+            ignore_uncommitted,
+            delete_remote,
+            rebase,
+            squash,
+        ),
         Commands::Remove(args) | Commands::Rm(args) => {
             remove_worktree(args.branch_name.as_deref(), args.force, args.delete_remote)
         }
@@ -189,8 +201,6 @@ pub fn run() -> Result<()> {
         }
     }
 }
-
-// --- Command Handlers (private to this module) ---
 
 fn create_worktree(branch_name: &str) -> Result<()> {
     let config = config::Config::load()?;
@@ -243,19 +253,20 @@ fn merge_worktree(
     branch_name: Option<&str>,
     ignore_uncommitted: bool,
     delete_remote: bool,
+    rebase: bool,
+    squash: bool,
 ) -> Result<()> {
-    // Determine the branch to merge
-    let branch_to_merge = if let Some(name) = branch_name {
-        name.to_string()
-    } else {
-        // Running from within a worktree - get current branch
-        git::get_current_branch().context("Failed to get current branch")?
-    };
-
     let config = config::Config::load()?;
 
-    let result = workflow::merge(&branch_to_merge, ignore_uncommitted, delete_remote, &config)
-        .context("Failed to merge worktree")?;
+    let result = workflow::merge(
+        branch_name,
+        ignore_uncommitted,
+        delete_remote,
+        rebase,
+        squash,
+        &config,
+    )
+    .context("Failed to merge worktree")?;
 
     if result.had_staged_changes {
         println!("✓ Committed staged changes");
