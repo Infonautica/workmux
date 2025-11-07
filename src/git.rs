@@ -119,36 +119,12 @@ pub fn create_worktree(
     Ok(())
 }
 
-/// Remove a git worktree
-pub fn remove_worktree(branch_name: &str, force: bool) -> Result<()> {
-    // Run from main worktree root to avoid issues when removing from within a worktree
-    let main_worktree_root = get_main_worktree_root()?;
-    let worktree_path = get_worktree_path(branch_name)?;
-
-    let path_str = worktree_path.to_str().ok_or_else(|| {
-        anyhow!(
-            "Worktree path is not valid UTF-8: {}",
-            worktree_path.display()
-        )
-    })?;
-
-    let mut cmd = Cmd::new("git")
-        .workdir(&main_worktree_root)
-        .arg("worktree")
-        .arg("remove");
-    if force {
-        cmd = cmd.arg("--force");
-    }
-    cmd.arg(path_str)
-        .run()
-        .context("Failed to remove worktree")?;
-
-    Ok(())
-}
-
 /// Prune stale worktree metadata
 pub fn prune_worktrees() -> Result<()> {
+    // Ensure this command always runs from a valid git directory.
+    let main_worktree_root = get_main_worktree_root()?;
     Cmd::new("git")
+        .workdir(&main_worktree_root)
         .args(&["worktree", "prune"])
         .run()
         .context("Failed to prune worktrees")?;

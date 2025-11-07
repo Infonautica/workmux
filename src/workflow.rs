@@ -427,7 +427,13 @@ pub fn merge(
 
     // Always force cleanup after a successful merge
     let prefix = config.window_prefix();
-    cleanup(prefix, &branch_to_merge, true, delete_remote)?;
+    cleanup(
+        prefix,
+        &branch_to_merge,
+        &worktree_path,
+        true,
+        delete_remote,
+    )?;
 
     // Navigate to the main branch window if it exists
     if tmux::is_running()? && tmux::window_exists(prefix, &main_branch)? {
@@ -456,17 +462,6 @@ pub fn remove(
     let worktree_path = git::get_worktree_path(branch_name)
         .with_context(|| format!("No worktree found for branch '{}'", branch_name))?;
 
-    // Change to the main worktree root so this process isn't holding an open
-    // file handle on the worktree we're about to remove.
-    let main_worktree_root = git::get_main_worktree_root()
-        .context("Failed to determine the main worktree root")?;
-    std::env::set_current_dir(&main_worktree_root).with_context(|| {
-        format!(
-            "Failed to change directory to main worktree root: {:?}",
-            main_worktree_root
-        )
-    })?;
-
     // Safety Check: Prevent deleting the main branch
     let main_branch = git::get_default_branch()
         .context("Failed to determine the main branch. You can specify it in .workmux.yaml")?;
@@ -483,7 +478,7 @@ pub fn remove(
     // Note: Unmerged branch check removed - git branch -d/D handles this natively
     // The CLI provides a user-friendly confirmation prompt before calling this function
     let prefix = config.window_prefix();
-    cleanup(prefix, branch_name, force, delete_remote)?;
+    cleanup(prefix, branch_name, &worktree_path, force, delete_remote)?;
 
     // Navigate to the main branch window if it exists
     if tmux::is_running()? && tmux::window_exists(prefix, &main_branch)? {
@@ -499,9 +494,18 @@ pub fn remove(
 pub fn cleanup(
     prefix: &str,
     branch_name: &str,
+    worktree_path: &Path,
     force: bool,
     delete_remote: bool,
 ) -> Result<CleanupResult> {
+    // Change the CWD to a safe location (main worktree root) before any destructive
+    // operations. This prevents "Unable to read current working directory" errors
+    // when the command is run from within the worktree being deleted.
+    let main_worktree_root = git::get_main_worktree_root()
+        .context("Could not find main worktree to run cleanup operations")?;
+    std::env::set_current_dir(&main_worktree_root)
+        .context("Could not change directory to main worktree root")?;
+
     let mut result = CleanupResult {
         tmux_window_killed: false,
         worktree_removed: false,
@@ -510,32 +514,36 @@ pub fn cleanup(
         remote_delete_error: None,
     };
 
-    // Kill tmux window if it exists
-    match (tmux::is_running(), tmux::window_exists(prefix, branch_name)) {
-        (Ok(true), Ok(true)) => {
-            tmux::kill_window(prefix, branch_name).context("Failed to kill tmux window")?;
-            result.tmux_window_killed = true;
-        }
-        (Err(_), _) | (_, Err(_)) => {
-            // Error checking tmux status, continue with cleanup
-        }
-        _ => {
-            // Tmux not running or window doesn't exist
-        }
+    // 1. Kill tmux window to release any shell locks on the directory.
+    if tmux::is_running().unwrap_or(false)
+        && tmux::window_exists(prefix, branch_name).unwrap_or(false)
+    {
+        tmux::kill_window(prefix, branch_name).context("Failed to kill tmux window")?;
+        result.tmux_window_killed = true;
     }
 
-    // Remove worktree
-    git::remove_worktree(branch_name, force).context("Failed to remove worktree")?;
-    result.worktree_removed = true;
+    // 2. Forcefully remove the worktree directory from the filesystem.
+    // This is more reliable than `git worktree remove`, which can fail if the directory is in use.
+    if worktree_path.exists() {
+        std::fs::remove_dir_all(worktree_path).with_context(|| {
+            format!(
+                "Failed to remove worktree directory at {}. \
+                Please close any terminals or editors using this directory and try again.",
+                worktree_path.display()
+            )
+        })?;
+        result.worktree_removed = true;
+    }
 
-    // Prune worktrees to ensure git's state is clean
+    // 3. Prune worktrees. This cleans up git's metadata by removing the reference
+    // to the directory we just deleted. This must happen *after* directory removal.
     git::prune_worktrees().context("Failed to prune worktrees")?;
 
-    // Delete local branch
+    // 4. Delete the local branch.
     git::delete_branch(branch_name, force).context("Failed to delete local branch")?;
     result.local_branch_deleted = true;
 
-    // Delete remote branch if requested
+    // 5. Delete the remote branch if requested.
     if delete_remote {
         match git::delete_remote_branch(branch_name) {
             Ok(_) => result.remote_branch_deleted = true,
