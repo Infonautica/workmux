@@ -556,7 +556,7 @@ interfaces, like a TUI or kanban board. workmux takes a different approach:
 or abstraction layer. With workmux, managing parallel agents is managing tmux
 windows.
 
-## Related projects
+## See also
 
 - [tmux-bro](https://github.com/raine/tmux-bro)
 - [tmux-file-picker](https://github.com/raine/tmux-file-picker)
