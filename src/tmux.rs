@@ -146,7 +146,7 @@ pub fn build_startup_command(command: Option<&str>) -> Result<Option<String>> {
     // commands from sourcing interactive-only rc files (like ~/.zshrc) that would
     // otherwise alter PATH compared to panes without explicit commands.
     let full_command = format!(
-        "{shell} -lc '{escaped_command}; exec {shell} -l'",
+        "{shell} -lic '{escaped_command}; exec {shell} -l'",
         shell = shell,
         escaped_command = escaped_command
     );
