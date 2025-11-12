@@ -164,6 +164,34 @@ panes:
   - Both configurations include a second pane split horizontally
 - `post_create` commands are optional and only run if you configure them
 
+### Directory structure
+
+Here's how workmux organizes your worktrees by default:
+
+```
+~/projects/
+├── my-project/               <-- Main project directory
+│   ├── src/
+│   ├── package.json
+│   └── .workmux.yaml
+│
+└── my-project__worktrees/    <-- Worktrees created by workmux
+    ├── feature-A/            <-- Isolated workspace for 'feature-A' branch
+    │   ├── src/
+    │   └── package.json
+    │
+    └── bugfix-B/             <-- Isolated workspace for 'bugfix-B' branch
+        ├── src/
+        └── package.json
+```
+
+Each worktree is a separate working directory for a different branch, all sharing
+the same git repository. This allows you to work on multiple branches
+simultaneously without conflicts.
+
+You can customize the worktree directory location using the `worktree_dir`
+configuration option (see [Configuration options](#configuration-options)).
+
 ### Shell alias (recommended)
 
 For faster typing, alias `workmux` to `wm`:
