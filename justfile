@@ -10,9 +10,10 @@ default:
 # Run format, clippy-fix, build, and tests
 check: format clippy-fix build test
 
-# Format Rust files
+# Format Rust and Python files
 format:
     cargo fmt --all
+    ruff format tests --quiet
 
 # Run clippy with all warnings
 clippy:

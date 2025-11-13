@@ -1,25 +1,29 @@
 import os
-import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 import pytest
+import yaml
+
 
 class TmuxEnvironment:
     """
     A helper class to manage the state of an isolated test environment.
     It controls a dedicated tmux server via a private socket file.
     """
+
     def __init__(self, tmp_path: Path):
         # The base directory for all temporary test files
         self.tmp_path = tmp_path
 
         # Use a short socket path in /tmp to avoid macOS socket path length limits
         # Create a temporary file and use its name for the socket
-        tmp_file = tempfile.NamedTemporaryFile(prefix="tmux_", suffix=".sock", delete=False)
+        tmp_file = tempfile.NamedTemporaryFile(
+            prefix="tmux_", suffix=".sock", delete=False
+        )
         self.socket_path = Path(tmp_file.name)
         tmp_file.close()
         self.socket_path.unlink()  # Remove the file, we just want the path
@@ -138,3 +142,156 @@ def workmux_exe_path() -> Path:
     if not local_path.exists():
         pytest.fail("Could not find workmux executable. Run 'cargo build' first.")
     return local_path
+
+
+def write_workmux_config(
+    repo_path: Path,
+    panes: Optional[List[Dict[str, Any]]] = None,
+    post_create: Optional[List[str]] = None,
+):
+    """Creates a .workmux.yaml file from structured data."""
+    config: Dict[str, Any] = {"panes": panes if panes is not None else []}
+    if post_create:
+        config["post_create"] = post_create
+    (repo_path / ".workmux.yaml").write_text(yaml.dump(config))
+
+
+def get_worktree_path(repo_path: Path, branch_name: str) -> Path:
+    """Returns the expected path for a worktree directory."""
+    return repo_path.parent / f"{repo_path.name}__worktrees" / branch_name
+
+
+def get_window_name(branch_name: str) -> str:
+    """Returns the expected tmux window name for a worktree."""
+    return f"wm-{branch_name}"
+
+
+def run_workmux_command(
+    env: TmuxEnvironment,
+    workmux_exe_path: Path,
+    repo_path: Path,
+    command: str,
+    pre_run_tmux_cmds: Optional[List[List[str]]] = None,
+) -> None:
+    """
+    Helper to run a workmux command inside the isolated tmux session.
+
+    Asserts that the command completes successfully.
+
+    Args:
+        env: The isolated tmux environment
+        workmux_exe_path: Path to the workmux executable
+        repo_path: Path to the git repository
+        command: The workmux command to run (e.g., "add feature-branch")
+        pre_run_tmux_cmds: Optional list of tmux commands to run before the command
+    """
+    stdout_file = env.tmp_path / "workmux_stdout.txt"
+    stderr_file = env.tmp_path / "workmux_stderr.txt"
+    exit_code_file = env.tmp_path / "workmux_exit_code.txt"
+
+    # Clean up any previous files
+    for f in [stdout_file, stderr_file, exit_code_file]:
+        if f.exists():
+            f.unlink()
+
+    # Execute any pre-run setup commands in tmux
+    if pre_run_tmux_cmds:
+        for cmd_args in pre_run_tmux_cmds:
+            env.tmux(cmd_args)
+
+    workmux_cmd = (
+        f"cd {repo_path} && "
+        f"{workmux_exe_path} {command} "
+        f"> {stdout_file} 2> {stderr_file}; "
+        f"echo $? > {exit_code_file}"
+    )
+
+    env.tmux(["send-keys", "-t", "test:", workmux_cmd, "C-m"])
+
+    # Wait for command to complete
+    assert poll_until(exit_code_file.exists, timeout=5.0), (
+        "workmux command did not complete in time"
+    )
+
+    exit_code = int(exit_code_file.read_text().strip())
+    if exit_code != 0:
+        stderr = stderr_file.read_text() if stderr_file.exists() else ""
+        raise AssertionError(
+            f"workmux {command} failed with exit code {exit_code}\n{stderr}"
+        )
+
+
+def run_workmux_add(
+    env: TmuxEnvironment,
+    workmux_exe_path: Path,
+    repo_path: Path,
+    branch_name: str,
+    pre_run_tmux_cmds: Optional[List[List[str]]] = None,
+) -> None:
+    """
+    Helper to run `workmux add` command inside the isolated tmux session.
+
+    Asserts that the command completes successfully.
+
+    Args:
+        env: The isolated tmux environment
+        workmux_exe_path: Path to the workmux executable
+        repo_path: Path to the git repository
+        branch_name: Name of the branch/worktree to create
+        pre_run_tmux_cmds: Optional list of tmux commands to run before workmux add
+    """
+    run_workmux_command(
+        env, workmux_exe_path, repo_path, f"add {branch_name}", pre_run_tmux_cmds
+    )
+
+
+def run_workmux_remove(
+    env: TmuxEnvironment,
+    workmux_exe_path: Path,
+    repo_path: Path,
+    branch_name: str,
+    force: bool = False,
+) -> None:
+    """
+    Helper to run `workmux remove` command inside the isolated tmux session.
+
+    Uses tmux run-shell -b to avoid hanging when remove kills its own window.
+    Asserts that the command completes successfully.
+
+    Args:
+        env: The isolated tmux environment
+        workmux_exe_path: Path to the workmux executable
+        repo_path: Path to the git repository
+        branch_name: Name of the branch/worktree to remove
+        force: Whether to use -f flag to skip confirmation
+    """
+    stdout_file = env.tmp_path / "workmux_remove_stdout.txt"
+    stderr_file = env.tmp_path / "workmux_remove_stderr.txt"
+    exit_code_file = env.tmp_path / "workmux_remove_exit_code.txt"
+
+    # Clean up any previous files
+    for f in [stdout_file, stderr_file, exit_code_file]:
+        if f.exists():
+            f.unlink()
+
+    force_flag = "-f " if force else ""
+    remove_script = (
+        f"cd {repo_path} && "
+        f"{workmux_exe_path} remove {force_flag}{branch_name} "
+        f"> {stdout_file} 2> {stderr_file}; "
+        f"echo $? > {exit_code_file}"
+    )
+
+    env.tmux(["run-shell", "-b", remove_script])
+
+    # Wait for command to complete
+    assert poll_until(exit_code_file.exists, timeout=5.0), (
+        "workmux remove did not complete in time"
+    )
+
+    exit_code = int(exit_code_file.read_text().strip())
+    if exit_code != 0:
+        stderr = stderr_file.read_text() if stderr_file.exists() else ""
+        raise AssertionError(
+            f"workmux remove failed with exit code {exit_code}\n{stderr}"
+        )

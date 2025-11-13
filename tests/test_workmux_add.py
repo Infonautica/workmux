@@ -1,85 +1,14 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-import yaml
-
-from .conftest import TmuxEnvironment, poll_until
-
-
-def write_workmux_config(
-    repo_path: Path,
-    panes: Optional[List[Dict[str, Any]]] = None,
-    post_create: Optional[List[str]] = None,
-):
-    """Creates a .workmux.yaml file from structured data."""
-    config: Dict[str, Any] = {"panes": panes if panes is not None else []}
-    if post_create:
-        config["post_create"] = post_create
-    (repo_path / ".workmux.yaml").write_text(yaml.dump(config))
-
-
-def get_worktree_path(repo_path: Path, branch_name: str) -> Path:
-    """Returns the expected path for a worktree directory."""
-    return repo_path.parent / f"{repo_path.name}__worktrees" / branch_name
-
-
-def get_window_name(branch_name: str) -> str:
-    """Returns the expected tmux window name for a worktree."""
-    return f"wm-{branch_name}"
-
-
-def run_workmux_add(
-    env: TmuxEnvironment,
-    workmux_exe_path: Path,
-    repo_path: Path,
-    branch_name: str,
-    pre_run_tmux_cmds: Optional[List[List[str]]] = None,
-) -> None:
-    """
-    Helper to run `workmux add` command inside the isolated tmux session.
-
-    Asserts that the command completes successfully.
-
-    Args:
-        env: The isolated tmux environment
-        workmux_exe_path: Path to the workmux executable
-        repo_path: Path to the git repository
-        branch_name: Name of the branch/worktree to create
-        pre_run_tmux_cmds: Optional list of tmux commands to run before workmux add
-    """
-    stdout_file = env.tmp_path / "workmux_stdout.txt"
-    stderr_file = env.tmp_path / "workmux_stderr.txt"
-    exit_code_file = env.tmp_path / "workmux_exit_code.txt"
-
-    # Clean up any previous files
-    for f in [stdout_file, stderr_file, exit_code_file]:
-        if f.exists():
-            f.unlink()
-
-    # Execute any pre-run setup commands in tmux
-    if pre_run_tmux_cmds:
-        for cmd_args in pre_run_tmux_cmds:
-            env.tmux(cmd_args)
-
-    workmux_cmd = (
-        f"cd {repo_path} && "
-        f"{workmux_exe_path} add {branch_name} "
-        f"> {stdout_file} 2> {stderr_file}; "
-        f"echo $? > {exit_code_file}"
-    )
-
-    env.tmux(["send-keys", "-t", "test:", workmux_cmd, "C-m"])
-
-    # Wait for command to complete
-    assert poll_until(exit_code_file.exists, timeout=5.0), (
-        "workmux command did not complete in time"
-    )
-
-    exit_code = int(exit_code_file.read_text().strip())
-    if exit_code != 0:
-        stderr = stderr_file.read_text() if stderr_file.exists() else ""
-        raise AssertionError(f"workmux add failed with exit code {exit_code}\n{stderr}")
+from .conftest import (
+    TmuxEnvironment,
+    get_window_name,
+    get_worktree_path,
+    poll_until,
+    run_workmux_add,
+    write_workmux_config,
+)
 
 
 def test_add_creates_worktree(
