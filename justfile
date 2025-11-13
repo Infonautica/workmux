@@ -7,9 +7,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Run format, clippy-fix, and build in parallel
-[parallel]
-check: format clippy-fix build
+# Run format, clippy-fix, build, and tests
+check: format clippy-fix build test
 
 # Format Rust files
 format:
@@ -30,6 +29,13 @@ build:
 # Run the application
 run *ARGS:
     cargo run -- "$@"
+
+# Run Python tests
+test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source tests/venv/bin/activate
+    pytest tests/ -v
 
 # Release a new patch version
 release-patch:

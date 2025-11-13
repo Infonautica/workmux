@@ -24,7 +24,7 @@ pub fn get_all_window_names() -> Result<HashSet<String>> {
 
 /// Check if tmux server is running
 pub fn is_running() -> Result<bool> {
-    Cmd::new("tmux").arg("info").run_as_check()
+    Cmd::new("tmux").arg("has-session").run_as_check()
 }
 
 /// Check if a tmux window with the given name exists
