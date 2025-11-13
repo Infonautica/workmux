@@ -19,6 +19,11 @@ class TmuxEnvironment:
         # The base directory for all temporary test files
         self.tmp_path = tmp_path
 
+        # Create a dedicated home directory for the test to prevent
+        # loading the user's real shell configuration (.zshrc, .bash_history, etc.)
+        self.home_path = self.tmp_path / "test_home"
+        self.home_path.mkdir()
+
         # Use a short socket path in /tmp to avoid macOS socket path length limits
         # Create a temporary file and use its name for the socket
         tmp_file = tempfile.NamedTemporaryFile(
@@ -30,6 +35,10 @@ class TmuxEnvironment:
 
         # Create a copy of the current environment variables
         self.env = os.environ.copy()
+
+        # Isolate the shell environment completely to prevent history pollution
+        # and other side effects from user's shell configuration
+        self.env["HOME"] = str(self.home_path)
 
         # IMPORTANT: Tell all future tmux commands to use our private socket.
         # This is the key to isolating the test from the user's live tmux session.

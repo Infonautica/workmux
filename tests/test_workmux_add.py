@@ -100,25 +100,24 @@ def test_add_sources_shell_rc_files(
     window_name = get_window_name(branch_name)
     alias_output = "custom_alias_worked_correctly"
 
-    # Create a custom HOME directory with a .zshrc that defines an alias
-    test_home = env.tmp_path / "test_home"
-    test_home.mkdir()
+    # The environment now provides an isolated HOME directory.
+    # Write the .zshrc file there.
     zshrc_content = f"""
 # Test alias
 alias testcmd='echo "{alias_output}"'
 """
-    (test_home / ".zshrc").write_text(zshrc_content)
+    (env.home_path / ".zshrc").write_text(zshrc_content)
 
     write_workmux_config(repo_path, panes=[{"command": "testcmd; sleep 0.5"}])
 
-    # Define pre-run commands to set the environment inside tmux
+    # The HOME env var is already set for the tmux server.
+    # We still need to ensure the correct SHELL is used if it's non-standard.
     shell_path = os.environ.get("SHELL", "/bin/zsh")
     pre_cmds = [
-        ["setenv", "HOME", str(test_home)],
-        ["setenv", "SHELL", shell_path],
+        ["set-option", "-g", "default-shell", shell_path],
     ]
 
-    # Run workmux add using the generalized helper
+    # Run workmux add. No pre-run `setenv` for HOME is needed anymore.
     run_workmux_add(
         env, workmux_exe_path, repo_path, branch_name, pre_run_tmux_cmds=pre_cmds
     )
