@@ -137,7 +137,7 @@ alias testcmd='echo "{alias_output}"'
 def test_add_from_specific_branch(
     isolated_tmux_server: TmuxEnvironment, workmux_exe_path: Path, repo_path: Path
 ):
-    """Verifies that `workmux add --from` creates a worktree from a specific branch."""
+    """Verifies that `workmux add --base` creates a worktree from a specific branch."""
     env = isolated_tmux_server
     new_branch = "feature-from-base"
 
@@ -150,12 +150,12 @@ def test_add_from_specific_branch(
     result = env.run_command(["git", "branch", "--show-current"], cwd=repo_path)
     base_branch = result.stdout.strip()
 
-    # Run workmux add with --from flag
+    # Run workmux add with --base flag
     run_workmux_command(
         env,
         workmux_exe_path,
         repo_path,
-        f"add {new_branch} --from {base_branch}",
+        f"add {new_branch} --base {base_branch}",
     )
 
     # Verify worktree was created

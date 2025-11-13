@@ -104,7 +104,7 @@ enum Commands {
 
         /// Base branch/commit/tag to branch from
         #[arg(long)]
-        from: Option<String>,
+        base: Option<String>,
     },
 
     /// Open a tmux window for an existing worktree
@@ -181,7 +181,7 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Add { branch_name, from } => create_worktree(&branch_name, from.as_deref()),
+        Commands::Add { branch_name, base } => create_worktree(&branch_name, base.as_deref()),
         Commands::Open {
             branch_name,
             run_hooks,
