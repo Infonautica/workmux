@@ -232,9 +232,12 @@ immediately. If the branch doesn't exist, it will be created automatically.
   shorthand for passing that branch explicitly via `--base` and is helpful when
   stacking feature branches.
 - `-p, --prompt <text>`: Provide an inline prompt that will be automatically passed to
-  AI agent panes (mutually exclusive with `--prompt-file`).
+  AI agent panes.
 - `-P, --prompt-file <path>`: Provide a path to a file whose contents will be used as the
-  prompt (mutually exclusive with `--prompt`).
+  prompt.
+- `-e, --prompt-editor`: Open your `$EDITOR` (or `$VISUAL`) to write the prompt interactively.
+
+Note: The prompt options are mutually exclusive - you can only use one at a time.
 
 #### What happens
 
@@ -273,11 +276,14 @@ workmux add feature/ai --prompt "Implement user authentication with OAuth"
 
 # Create a worktree with a prompt from a file
 workmux add feature/refactor --prompt-file task-description.md
+
+# Open your editor to write a prompt interactively
+workmux add feature/new-api --prompt-editor
 ```
 
 #### AI agent integration
 
-When you provide a prompt via `--prompt` or `--prompt-file`, workmux automatically
+When you provide a prompt via `--prompt`, `--prompt-file`, or `--prompt-editor`, workmux automatically
 injects the prompt into panes running AI agent commands (`claude`, `codex`, `gemini`)
 without requiring any `.workmux.yaml` changes:
 

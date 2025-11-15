@@ -122,12 +122,16 @@ enum Commands {
         from_current: bool,
 
         /// Inline prompt text to store in the new worktree
-        #[arg(short = 'p', long, conflicts_with = "prompt_file")]
+        #[arg(short = 'p', long, conflicts_with_all = ["prompt_file", "prompt_editor"])]
         prompt: Option<String>,
 
         /// Path to a file whose contents should be used as the prompt
-        #[arg(short = 'P', long = "prompt-file", conflicts_with = "prompt")]
+        #[arg(short = 'P', long = "prompt-file", conflicts_with_all = ["prompt", "prompt_editor"])]
         prompt_file: Option<PathBuf>,
+
+        /// Open $EDITOR to write the prompt
+        #[arg(short = 'e', long = "prompt-editor", conflicts_with_all = ["prompt", "prompt_file"])]
+        prompt_editor: bool,
     },
 
     /// Open a tmux window for an existing worktree
@@ -210,6 +214,7 @@ pub fn run() -> Result<()> {
             from_current,
             prompt,
             prompt_file,
+            prompt_editor,
         } => {
             // Check if branch_name is a remote ref (e.g., origin/feature/foo)
             let remotes = git::list_remotes().context("Failed to list git remotes")?;
@@ -217,11 +222,21 @@ pub fn run() -> Result<()> {
                 .iter()
                 .find(|r| branch_name.starts_with(&format!("{}/", r)));
 
-            let prompt_data = match (prompt, prompt_file) {
-                (Some(inline), None) => Some(Prompt::Inline(inline)),
-                (None, Some(path)) => Some(Prompt::FromFile(path)),
-                (None, None) => None,
-                _ => None, // clap enforces exclusivity; this is unreachable
+            let prompt_data = if prompt_editor {
+                let editor_content =
+                    edit::edit("").context("Failed to open editor or read content")?;
+                let trimmed = editor_content.trim();
+                if trimmed.is_empty() {
+                    return Err(anyhow!("Aborting: prompt is empty"));
+                }
+                Some(Prompt::Inline(trimmed.to_string()))
+            } else {
+                match (prompt, prompt_file) {
+                    (Some(inline), None) => Some(Prompt::Inline(inline)),
+                    (None, Some(path)) => Some(Prompt::FromFile(path)),
+                    (None, None) => None,
+                    _ => None, // clap enforces exclusivity; this is unreachable
+                }
             };
 
             if let Some(remote_name) = detected_remote {
