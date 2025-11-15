@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
@@ -258,6 +259,7 @@ pub fn setup_panes(
     window_name: &str,
     panes: &[PaneConfig],
     working_dir: &Path,
+    prompt_file_path: Option<&Path>,
 ) -> Result<PaneSetupResult> {
     if panes.is_empty() {
         return Ok(PaneSetupResult {
@@ -269,7 +271,11 @@ pub fn setup_panes(
 
     // Handle the first pane (index 0), which already exists from window creation
     if let Some(pane_config) = panes.first() {
-        if let Some(cmd_str) = pane_config.command.as_deref()
+        let adjusted_command = pane_config
+            .command
+            .as_deref()
+            .map(|cmd| adjust_command(cmd, prompt_file_path, working_dir));
+        if let Some(cmd_str) = adjusted_command.as_ref().map(|c| c.as_ref())
             && let Some(startup_cmd) = build_startup_command(Some(cmd_str))?
         {
             respawn_pane(prefix, window_name, 0, working_dir, &startup_cmd)?;
@@ -287,7 +293,11 @@ pub fn setup_panes(
             // Determine which pane to split
             let target_pane_to_split = pane_config.target.unwrap_or(actual_pane_count - 1);
 
-            let startup_cmd = build_startup_command(pane_config.command.as_deref())?;
+            let adjusted_command = pane_config
+                .command
+                .as_deref()
+                .map(|cmd| adjust_command(cmd, prompt_file_path, working_dir));
+            let startup_cmd = build_startup_command(adjusted_command.as_ref().map(|c| c.as_ref()))?;
 
             split_pane_with_command(
                 prefix,
@@ -310,4 +320,181 @@ pub fn setup_panes(
     Ok(PaneSetupResult {
         focus_pane_index: focus_pane_index.unwrap_or(0),
     })
+}
+
+fn adjust_command<'a>(
+    command: &'a str,
+    prompt_file_path: Option<&Path>,
+    working_dir: &Path,
+) -> Cow<'a, str> {
+    if let Some(prompt_path) = prompt_file_path
+        && let Some(rewritten) = rewrite_agent_command(command, prompt_path, working_dir)
+    {
+        return Cow::Owned(rewritten);
+    }
+    Cow::Borrowed(command)
+}
+
+fn rewrite_agent_command(command: &str, prompt_file: &Path, working_dir: &Path) -> Option<String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (first_token, rest) = split_first_token(trimmed)?;
+
+    // Extract the agent name from the command (handles paths like /usr/local/bin/claude)
+    let agent_name = std::path::Path::new(first_token)
+        .file_name()
+        .and_then(|s| s.to_str());
+
+    let relative = prompt_file.strip_prefix(working_dir).unwrap_or(prompt_file);
+    let prompt_path = relative.to_string_lossy();
+    let rest = rest.trim_start();
+
+    let rewritten = match agent_name {
+        Some("claude") | Some("codex") => {
+            // Pass the prompt file using @ syntax
+            let mut cmd = format!("{} @{}", first_token, prompt_path);
+            if !rest.is_empty() {
+                cmd.push(' ');
+                cmd.push_str(rest);
+            }
+            cmd
+        }
+        Some("gemini") => {
+            // gemini needs -i flag for interactive mode after prompt
+            let mut cmd = format!("{} -i @{}", first_token, prompt_path);
+            if !rest.is_empty() {
+                cmd.push(' ');
+                cmd.push_str(rest);
+            }
+            cmd
+        }
+        _ => return None,
+    };
+
+    Some(rewritten)
+}
+
+fn split_first_token(command: &str) -> Option<(&str, &str)> {
+    let trimmed = command.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // `split_once` finds the first whitespace and splits there
+    // If no whitespace found, returns None, so we treat whole string as first token
+    Some(
+        trimmed
+            .split_once(char::is_whitespace)
+            .unwrap_or((trimmed, "")),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_rewrite_claude_command() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("claude", &prompt_file, &working_dir);
+        assert_eq!(result, Some("claude @PROMPT.md".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_codex_command() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("codex", &prompt_file, &working_dir);
+        assert_eq!(result, Some("codex @PROMPT.md".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_gemini_command() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("gemini", &prompt_file, &working_dir);
+        assert_eq!(result, Some("gemini -i @PROMPT.md".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_command_with_path() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("/usr/local/bin/claude", &prompt_file, &working_dir);
+        assert_eq!(result, Some("/usr/local/bin/claude @PROMPT.md".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_command_with_args() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("claude --verbose", &prompt_file, &working_dir);
+        assert_eq!(result, Some("claude @PROMPT.md --verbose".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_unknown_agent() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("unknown-agent", &prompt_file, &working_dir);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_rewrite_empty_command() {
+        let prompt_file = PathBuf::from("/tmp/worktree/PROMPT.md");
+        let working_dir = PathBuf::from("/tmp/worktree");
+
+        let result = rewrite_agent_command("", &prompt_file, &working_dir);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_split_first_token_single_word() {
+        assert_eq!(split_first_token("claude"), Some(("claude", "")));
+    }
+
+    #[test]
+    fn test_split_first_token_with_args() {
+        assert_eq!(
+            split_first_token("claude --verbose"),
+            Some(("claude", "--verbose"))
+        );
+    }
+
+    #[test]
+    fn test_split_first_token_multiple_spaces() {
+        assert_eq!(
+            split_first_token("claude   --verbose"),
+            Some(("claude", "  --verbose"))
+        );
+    }
+
+    #[test]
+    fn test_split_first_token_leading_whitespace() {
+        assert_eq!(
+            split_first_token("  claude --verbose"),
+            Some(("claude", "--verbose"))
+        );
+    }
+
+    #[test]
+    fn test_split_first_token_empty_string() {
+        assert_eq!(split_first_token(""), None);
+    }
+
+    #[test]
+    fn test_split_first_token_only_whitespace() {
+        assert_eq!(split_first_token("   "), None);
+    }
 }

@@ -3,13 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::{thread, time::Duration};
 
-use crate::{cmd, config, git, tmux};
+use crate::{cli, cmd, config, git, tmux};
 use tracing::{debug, info, trace, warn};
 
 use fs_extra::dir as fs_dir;
 use fs_extra::file as fs_file;
 
 const WINDOW_CLOSE_DELAY_MS: u64 = 300;
+const PROMPT_FILE_NAME: &str = "PROMPT.md";
 
 /// Result of creating a worktree
 pub struct CreateResult {
@@ -45,6 +46,7 @@ pub struct CleanupResult {
 struct SetupOptions {
     run_hooks: bool,
     force_files: bool,
+    prompt_file_path: Option<PathBuf>,
 }
 
 /// Create a new worktree with tmux window and panes
@@ -52,6 +54,7 @@ pub fn create(
     branch_name: &str,
     base_branch: Option<&str>,
     remote_branch: Option<&str>,
+    prompt: Option<&cli::Prompt>,
     config: &config::Config,
 ) -> Result<CreateResult> {
     info!(
@@ -192,9 +195,16 @@ pub fn create(
     .context("Failed to create git worktree")?;
 
     // Setup the rest of the environment (tmux, files, hooks)
+    let prompt_file_path = if let Some(p) = prompt {
+        Some(write_prompt_file(&worktree_path, p)?)
+    } else {
+        None
+    };
+
     let options = SetupOptions {
         run_hooks: true,
         force_files: true,
+        prompt_file_path,
     };
     let mut result = setup_environment(branch_name, &worktree_path, config, &options)?;
     result.base_branch = base_branch_for_creation.clone();
@@ -253,6 +263,7 @@ pub fn open(
     let options = SetupOptions {
         run_hooks,
         force_files,
+        prompt_file_path: None,
     };
     let result = setup_environment(branch_name, &worktree_path, config, &options)?;
     info!(
@@ -323,8 +334,14 @@ fn setup_environment(
 
     // Setup panes
     let panes = config.panes.as_deref().unwrap_or(&[]);
-    let pane_setup_result = tmux::setup_panes(prefix, branch_name, panes, worktree_path)
-        .context("Failed to setup panes")?;
+    let pane_setup_result = tmux::setup_panes(
+        prefix,
+        branch_name,
+        panes,
+        worktree_path,
+        options.prompt_file_path.as_deref(),
+    )
+    .context("Failed to setup panes")?;
     debug!(
         branch = branch_name,
         focus_index = pane_setup_result.focus_pane_index,
@@ -1035,4 +1052,16 @@ pub fn list(config: &config::Config) -> Result<Vec<WorktreeInfo>> {
         .collect();
 
     Ok(worktrees)
+}
+fn write_prompt_file(worktree_path: &Path, prompt: &cli::Prompt) -> Result<PathBuf> {
+    let content = match prompt {
+        cli::Prompt::Inline(text) => text.clone(),
+        cli::Prompt::FromFile(path) => fs::read_to_string(path)
+            .with_context(|| format!("Failed to read prompt file '{}'", path.display()))?,
+    };
+
+    let prompt_path = worktree_path.join(PROMPT_FILE_NAME);
+    fs::write(&prompt_path, content)
+        .with_context(|| format!("Failed to write prompt file '{}'", prompt_path.display()))?;
+    Ok(prompt_path)
 }

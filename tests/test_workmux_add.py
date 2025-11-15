@@ -1,4 +1,5 @@
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,20 @@ from .conftest import (
     write_workmux_config,
     write_global_workmux_config,
 )
+
+
+def install_fake_agent(env: TmuxEnvironment, name: str, script_body: str) -> Path:
+    """Creates a fake agent command in PATH so tmux panes can invoke it."""
+    bin_dir = env.tmp_path / "agents-bin"
+    bin_dir.mkdir(exist_ok=True)
+    script_path = bin_dir / name
+    script_path.write_text(script_body)
+    script_path.chmod(0o755)
+
+    new_path = f"{bin_dir}:{env.env.get('PATH', '')}"
+    env.env["PATH"] = new_path
+    env.tmux(["set-environment", "-g", "PATH", new_path])
+    return script_path
 
 
 def test_add_creates_worktree(
@@ -54,6 +69,127 @@ def test_add_creates_tmux_window(
     assert window_name in existing_windows
 
 
+def test_add_inline_prompt_injects_into_claude(
+    isolated_tmux_server: TmuxEnvironment, workmux_exe_path: Path, repo_path: Path
+):
+    """Inline prompts should be written to PROMPT.md and passed to claude using @ syntax."""
+    env = isolated_tmux_server
+    branch_name = "feature-inline-prompt"
+    prompt_text = "Implement inline prompt"
+    output_filename = "claude_prompt.txt"
+
+    fake_claude_path = install_fake_agent(
+        env,
+        "claude",
+        f"""#!/bin/sh
+# Debug: log all arguments
+echo "ARGS: $@" > debug_args.txt
+echo "ARG1: $1" >> debug_args.txt
+echo "ARG2: $2" >> debug_args.txt
+
+set -e
+# The implementation calls: claude @PROMPT.md
+if [ "$1" != "@PROMPT.md" ]; then
+    echo "Expected @PROMPT.md as first arg, got: $1" >&2
+    exit 1
+fi
+cat PROMPT.md > "{output_filename}"
+""",
+    )
+
+    # Use absolute path to ensure we use the fake claude
+    write_workmux_config(repo_path, panes=[{"command": str(fake_claude_path)}])
+
+    run_workmux_command(
+        env,
+        workmux_exe_path,
+        repo_path,
+        f"add {branch_name} --prompt '{prompt_text}'",
+    )
+
+    worktree_path = get_worktree_path(repo_path, branch_name)
+    prompt_file = worktree_path / "PROMPT.md"
+    assert prompt_file.read_text() == prompt_text
+
+    agent_output = worktree_path / output_filename
+    debug_output = worktree_path / "debug_args.txt"
+
+    def agent_wrote_prompt():
+        return agent_output.exists()
+
+    if not poll_until(agent_wrote_prompt, timeout=2.0):
+        # Print debug info if test fails
+        print(f"\nWorktree path: {worktree_path}")
+        print(f"Files in worktree: {list(worktree_path.iterdir())}")
+        if debug_output.exists():
+            print(f"\nDebug output:\n{debug_output.read_text()}")
+        else:
+            print("\nDebug output file not found - script never executed")
+
+        # Check tmux pane output
+        import subprocess
+
+        pane_content = env.tmux(["capture-pane", "-t", f"=wm-{branch_name}.0", "-p"])
+        print(f"\nTmux pane content:\n{pane_content.stdout}")
+
+        assert False, "Agent output not found"
+
+    assert agent_output.read_text() == prompt_text
+
+
+def test_add_prompt_file_injects_into_gemini(
+    isolated_tmux_server: TmuxEnvironment, workmux_exe_path: Path, repo_path: Path
+):
+    """Prompt file flag should populate PROMPT.md and pass it to gemini using @ syntax."""
+    env = isolated_tmux_server
+    branch_name = "feature-file-prompt"
+    prompt_source = repo_path / "prompt_source.txt"
+    prompt_source.write_text("File-based instructions")
+    output_filename = "gemini_prompt.txt"
+
+    fake_gemini_path = install_fake_agent(
+        env,
+        "gemini",
+        f"""#!/bin/sh
+set -e
+# The implementation calls: gemini -i @PROMPT.md
+if [ "$1" != "-i" ]; then
+    echo "Expected -i flag first" >&2
+    exit 1
+fi
+if [ "$2" != "@PROMPT.md" ]; then
+    echo "Expected @PROMPT.md as second arg, got: $2" >&2
+    exit 1
+fi
+cat PROMPT.md > "{output_filename}"
+""",
+    )
+
+    # Use absolute path to ensure we use the fake gemini
+    write_workmux_config(repo_path, panes=[{"command": str(fake_gemini_path)}])
+
+    run_workmux_command(
+        env,
+        workmux_exe_path,
+        repo_path,
+        f"add {branch_name} --prompt-file {shlex.quote(str(prompt_source))}",
+    )
+
+    worktree_path = get_worktree_path(repo_path, branch_name)
+    prompt_file = worktree_path / "PROMPT.md"
+    assert prompt_file.read_text() == prompt_source.read_text()
+
+    agent_output = worktree_path / output_filename
+
+    def agent_wrote_prompt():
+        return agent_output.exists()
+
+    assert poll_until(agent_wrote_prompt, timeout=2.0), (
+        "Prompt content was not passed to gemini"
+    )
+    assert agent_output.read_text() == prompt_source.read_text()
+
+
 def test_add_executes_post_create_hooks(
     isolated_tmux_server: TmuxEnvironment, workmux_exe_path: Path, repo_path: Path
 ):
@@ -69,6 +205,21 @@ def test_add_executes_post_create_hooks(
     # Verify hook file was created in the worktree directory
     expected_worktree_dir = get_worktree_path(repo_path, branch_name)
     assert (expected_worktree_dir / hook_file).exists()
+
+
+def test_add_without_prompt_skips_prompt_file(
+    isolated_tmux_server: TmuxEnvironment, workmux_exe_path: Path, repo_path: Path
+):
+    """Worktrees created without prompt flags should not create PROMPT.md."""
+    env = isolated_tmux_server
+    branch_name = "feature-no-prompt"
+
+    write_workmux_config(repo_path, panes=[])
+
+    run_workmux_add(env, workmux_exe_path, repo_path, branch_name)
+
+    worktree_path = get_worktree_path(repo_path, branch_name)
+    assert not (worktree_path / "PROMPT.md").exists()
 
 
 def test_add_executes_pane_commands(

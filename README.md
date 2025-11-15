@@ -230,6 +230,11 @@ immediately. If the branch doesn't exist, it will be created automatically.
 - `-c, --from-current`: Use your currently checked out branch as the base. This is a
   shorthand for passing that branch explicitly via `--base` and is helpful when
   stacking feature branches.
+- `-p, --prompt <text>`: Provide an inline prompt that will be written to `PROMPT.md` in
+  the new worktree and automatically passed to AI agent panes (mutually exclusive
+  with `--prompt-file`).
+- `--prompt-file <path>`: Provide a path to a file whose contents will be used as the
+  prompt (mutually exclusive with `--prompt`).
 
 **What happens:**
 
@@ -265,7 +270,29 @@ workmux add origin/user-auth-pr
 
 # Remote branches with slashes work too (creates local branch "feature/foo")
 workmux add origin/feature/foo
+
+# Create a worktree with an inline prompt for AI agents
+workmux add feature/ai --prompt "Implement user authentication with OAuth"
+# Or use the shorthand
+workmux add feature/ai -p "Implement user authentication with OAuth"
+
+# Create a worktree with a prompt from a file
+workmux add feature/refactor --prompt-file task-description.md
 ```
+
+**AI agent integration:**
+
+When you provide a prompt via `--prompt` or `--prompt-file`, workmux automatically
+injects the prompt into panes running AI agent commands (`claude`, `codex`, `gemini`)
+without requiring any `.workmux.yaml` changes:
+
+- The prompt content is written to `PROMPT.md` in the worktree root
+- Panes with known AI agents are automatically started with the given prompt
+- You can keep your `.workmux.yaml` pane configuration simple (e.g.,
+  `panes: [{ command: "claude" }]`) and let workmux handle prompt injection at runtime
+
+This means you can launch AI agents with task-specific prompts without modifying your
+project configuration for each task.
 
 ---
 

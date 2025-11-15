@@ -7,12 +7,12 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Run format, clippy-fix, build, and tests
+# Run format, clippy-fix, build, unit tests, and integration tests
 check: parallel-checks test
 
-# Run format, clippy-fix, and build in parallel
+# Run format, clippy-fix, build, and unit tests in parallel
 [parallel]
-parallel-checks: format clippy-fix build
+parallel-checks: format clippy-fix build unit-tests
 
 # Format Rust and Python files
 format:
@@ -30,6 +30,10 @@ clippy-fix:
 # Build the project
 build:
     cargo build --all
+
+# Run unit tests
+unit-tests:
+    cargo test --bin workmux
 
 # Run the application
 run *ARGS:

@@ -3,6 +3,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 struct WorktreeBranchParser;
@@ -71,6 +72,12 @@ impl clap::builder::TypedValueParser for WorktreeBranchParser {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Prompt {
+    Inline(String),
+    FromFile(PathBuf),
+}
+
 #[derive(clap::Args, Debug)]
 struct RemoveArgs {
     /// Name of the branch to remove (defaults to current branch)
@@ -113,6 +120,14 @@ enum Commands {
         /// Use the current branch as the base (shorthand for --base <current-branch>)
         #[arg(short = 'c', long = "from-current", conflicts_with = "base")]
         from_current: bool,
+
+        /// Inline prompt text to store in the new worktree
+        #[arg(short = 'p', long, conflicts_with = "prompt_file")]
+        prompt: Option<String>,
+
+        /// Path to a file whose contents should be used as the prompt
+        #[arg(long = "prompt-file", conflicts_with = "prompt")]
+        prompt_file: Option<PathBuf>,
     },
 
     /// Open a tmux window for an existing worktree
@@ -193,12 +208,21 @@ pub fn run() -> Result<()> {
             branch_name,
             base,
             from_current,
+            prompt,
+            prompt_file,
         } => {
             // Check if branch_name is a remote ref (e.g., origin/feature/foo)
             let remotes = git::list_remotes().context("Failed to list git remotes")?;
             let detected_remote = remotes
                 .iter()
                 .find(|r| branch_name.starts_with(&format!("{}/", r)));
+
+            let prompt_data = match (prompt, prompt_file) {
+                (Some(inline), None) => Some(Prompt::Inline(inline)),
+                (None, Some(path)) => Some(Prompt::FromFile(path)),
+                (None, None) => None,
+                _ => None, // clap enforces exclusivity; this is unreachable
+            };
 
             if let Some(remote_name) = detected_remote {
                 // Auto-detected remote ref
@@ -220,7 +244,7 @@ pub fn run() -> Result<()> {
 
                 // Create worktree with local branch name derived from remote ref
                 // Pass the full remote ref as the remote_branch parameter
-                create_worktree(&spec.branch, None, Some(&branch_name))
+                create_worktree(&spec.branch, None, Some(&branch_name), prompt_data.as_ref())
             } else {
                 // Regular local branch
                 let resolved_base = if from_current {
@@ -231,7 +255,12 @@ pub fn run() -> Result<()> {
                 } else {
                     base
                 };
-                create_worktree(&branch_name, resolved_base.as_deref(), None)
+                create_worktree(
+                    &branch_name,
+                    resolved_base.as_deref(),
+                    None,
+                    prompt_data.as_ref(),
+                )
             }
         }
         Commands::Open {
@@ -276,6 +305,7 @@ fn create_worktree(
     branch_name: &str,
     base_branch: Option<&str>,
     remote_branch: Option<&str>,
+    prompt: Option<&Prompt>,
 ) -> Result<()> {
     let config = config::Config::load()?;
 
@@ -284,7 +314,7 @@ fn create_worktree(
         println!("Running setup commands...");
     }
 
-    let result = workflow::create(branch_name, base_branch, remote_branch, &config)
+    let result = workflow::create(branch_name, base_branch, remote_branch, prompt, &config)
         .context("Failed to create worktree environment")?;
 
     if result.post_create_hooks_run > 0 {
