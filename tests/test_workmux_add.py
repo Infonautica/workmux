@@ -126,7 +126,6 @@ printf '%s' "$1" > "{output_filename}"
             print("\nDebug output file not found - script never executed")
 
         # Check tmux pane output
-        import subprocess
 
         pane_content = env.tmux(["capture-pane", "-t", f"=wm-{branch_name}.0", "-p"])
         print(f"\nTmux pane content:\n{pane_content.stdout}")

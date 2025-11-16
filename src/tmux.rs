@@ -275,15 +275,14 @@ pub fn setup_panes(
 
     // Handle the first pane (index 0), which already exists from window creation
     if let Some(pane_config) = panes.first() {
-        let adjusted_command = if run_commands {
-            let mut command_to_run = pane_config.command.clone();
-            if command_to_run.as_deref() == Some("<agent>") {
-                command_to_run = config.agent.clone();
-            }
+        let command_to_run = if pane_config.command.as_deref() == Some("<agent>") {
+            config.agent.as_ref()
+        } else {
+            pane_config.command.as_ref()
+        };
 
-            command_to_run
-                .as_deref()
-                .map(|cmd| adjust_command(cmd, prompt_file_path, working_dir, config))
+        let adjusted_command = if run_commands {
+            command_to_run.map(|cmd| adjust_command(cmd, prompt_file_path, working_dir, config))
         } else {
             None
         };
@@ -306,15 +305,14 @@ pub fn setup_panes(
             // Determine which pane to split
             let target_pane_to_split = pane_config.target.unwrap_or(actual_pane_count - 1);
 
-            let adjusted_command = if run_commands {
-                let mut command_to_run = pane_config.command.clone();
-                if command_to_run.as_deref() == Some("<agent>") {
-                    command_to_run = config.agent.clone();
-                }
+            let command_to_run = if pane_config.command.as_deref() == Some("<agent>") {
+                config.agent.as_ref()
+            } else {
+                pane_config.command.as_ref()
+            };
 
-                command_to_run
-                    .as_deref()
-                    .map(|cmd| adjust_command(cmd, prompt_file_path, working_dir, config))
+            let adjusted_command = if run_commands {
+                command_to_run.map(|cmd| adjust_command(cmd, prompt_file_path, working_dir, config))
             } else {
                 None
             };

@@ -10,9 +10,9 @@ default:
 # Run format, clippy-fix, build, unit tests, and integration tests
 check: parallel-checks test
 
-# Run format, clippy-fix, build, and unit tests in parallel
+# Run format, clippy-fix, build, unit tests, ruff, and pyright in parallel
 [parallel]
-parallel-checks: format clippy-fix build unit-tests
+parallel-checks: format clippy-fix build unit-tests ruff-check pyright
 
 # Format Rust and Python files
 format:
@@ -34,6 +34,17 @@ build:
 # Run unit tests
 unit-tests:
     cargo test --bin workmux
+
+# Run ruff linter on Python tests
+ruff-check:
+    ruff check tests --fix
+
+# Run pyright type checker on Python tests
+pyright:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source tests/venv/bin/activate
+    pyright tests
 
 # Run the application
 run *ARGS:
