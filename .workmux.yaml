@@ -12,5 +12,5 @@ files:
     - history
 
 pre_merge:
-  - just check
+  - just check-ci
   - just test
