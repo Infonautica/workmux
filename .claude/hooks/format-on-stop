@@ -40,9 +40,11 @@ if [ ${#py[@]} -gt 0 ] && command -v ruff >/dev/null 2>&1; then
     pids+=($!) names+=("ruff format")
 fi
 
-if [ ${#docs[@]} -gt 0 ] && [ -x ./docs/node_modules/.bin/prettier ]; then
-    ./docs/node_modules/.bin/prettier --write "${docs[@]}" >/dev/null 2>&1 &
-    pids+=($!) names+=("prettier")
+if [ ${#docs[@]} -gt 0 ] && [ -x ./docs/node_modules/.bin/oxfmt ]; then
+    # Strip docs/ prefix -- oxfmt must run from docs/ to find .oxfmtrc.json
+    rel_docs=("${docs[@]#docs/}")
+    (cd docs && ./node_modules/.bin/oxfmt "${rel_docs[@]}" >/dev/null 2>&1) &
+    pids+=($!) names+=("oxfmt")
 fi
 
 for i in "${!pids[@]}"; do
