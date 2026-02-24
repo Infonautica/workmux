@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+cd "$CLAUDE_PROJECT_DIR"
+
+input=$(cat)
+session_id=$(echo "$input" | jq -r '.session_id')
+
+tracking_file=".claude/temp/changed-files-${session_id}.txt"
+
+if [ ! -f "$tracking_file" ]; then
+    exit 0
+fi
+
+changed_files=$(cat "$tracking_file")
+rm "$tracking_file"
+
+if [ -z "$changed_files" ]; then
+    exit 0
+fi
+
+# Filter to files that still exist
+existing_files=""
+while IFS= read -r file; do
+    [ -f "$file" ] && existing_files+="$file"$'\n'
+done <<<"$changed_files"
+existing_files="${existing_files%$'\n'}"
+
+if [ -z "$existing_files" ]; then
+    exit 0
+fi
+
+pids=()
+
+# Rust files: cargo fmt
+rust_files=$(echo "$existing_files" | grep -E '\.rs$' || true)
+if [ -n "$rust_files" ]; then
+    (cargo fmt --all 2>&1 || true) &
+    pids+=($!)
+fi
+
+# Python files: ruff format
+python_files=$(echo "$existing_files" | grep -E '\.py$' || true)
+if [ -n "$python_files" ]; then
+    (echo "$python_files" | xargs ruff format --quiet 2>&1 || true) &
+    pids+=($!)
+fi
+
+# Docs files: prettier
+docs_files=$(echo "$existing_files" | grep -E '^docs/.*\.(md|json|css|yml|yaml|ts|js)$' || true)
+if [ -n "$docs_files" ]; then
+    (echo "$docs_files" | xargs ./docs/node_modules/.bin/prettier --write 2>/dev/null || true) &
+    pids+=($!)
+fi
+
+for pid in "${pids[@]}"; do
+    wait "$pid"
+done

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$CLAUDE_PROJECT_DIR"
+
+mkdir -p .claude/temp
+
+input=$(cat)
+
+session_id=$(echo "$input" | jq -r '.session_id')
+file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
+
+if [ -n "$file_path" ] && [ "$file_path" != "null" ]; then
+	file_path="${file_path#"$CLAUDE_PROJECT_DIR"/}"
+	tracking_file=".claude/temp/changed-files-${session_id}.txt"
+	echo "$file_path" >>"$tracking_file"
+
+	if [ -f "$tracking_file" ]; then
+		awk '!seen[$0]++' "$tracking_file" >"${tracking_file}.tmp"
+		mv "${tracking_file}.tmp" "$tracking_file"
+	fi
+fi
